@@ -7,7 +7,7 @@ A minimal Codex skill that crawls a docs site and saves internal pages as Markdo
 Direct run (no pre-checks, no scaffolding):
 
 ```
-uv run "<path-to-skill>/scripts/run_crawl_docs.py" <URL> --out "$PWD/docs"
+bash "<path-to-skill>/scripts/crawl_docs.sh" <URL> --out "$PWD/docs"
 ```
 
 Optional flags:
@@ -19,14 +19,9 @@ Optional flags:
 
 ## If It Fails
 
-Follow:
-
-```
-"<path-to-skill>/references/prepare-env.md"
-```
+Re-run the same command. The script bootstraps uv + venv automatically; if it still fails, fix missing system prerequisites (most commonly `curl`).
 
 ## Files
 
-- `scripts/run_crawl_docs.py` — the only executable script
-- `references/prepare-env.md` — post-failure environment setup guide
+- `scripts/crawl_docs.sh` — one-shot crawler + environment bootstrap
 - `SKILL.md` — skill instructions

@@ -1,7 +1,26 @@
-#!/usr/bin/env python3
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VENV_DIR="$SCRIPT_DIR/.venv"
+VENV_PY="$VENV_DIR/bin/python"
+
+print_help() {
+  cat <<'EOF'
+Usage:
+  crawl_docs.sh <URL> [--out <dir>] [--max-pages <int>]
+
+Notes:
+  - Auto-bootstraps uv + a local venv under scripts/.venv (Python 3.11) and installs crawl4ai if missing.
+  - If --out is not provided, defaults to "$PWD/docs" (from where you run the script).
+EOF
+}
+
+python_code() {
+  cat <<'__CRAWL_DOCS_PY__'
 import argparse
 import asyncio
-import html
+import html as html_module
 import os
 import re
 from collections import deque
@@ -21,13 +40,13 @@ def _sanitize_filename(name: str) -> str:
     return name[:120]
 
 
-def _extract_title(metadata: Optional[dict], html: str, url: str) -> str:
+def _extract_title(metadata: Optional[dict], html_content: str, url: str) -> str:
     if metadata and metadata.get("title"):
         return metadata["title"]
-    if html:
-        match = re.search(r"<title[^>]*>(.*?)</title>", html, flags=re.IGNORECASE | re.DOTALL)
+    if html_content:
+        match = re.search(r"<title[^>]*>(.*?)</title>", html_content, flags=re.IGNORECASE | re.DOTALL)
         if match:
-            title = html.unescape(match.group(1))
+            title = html_module.unescape(match.group(1))
             title = re.sub(r"\s+", " ", title).strip()
             if title:
                 return title
@@ -102,7 +121,7 @@ async def crawl_site(start_url: str, output_dir: str, max_pages: Optional[int]) 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Crawl a site and save pages as Markdown.")
     parser.add_argument("url", help="Start URL, e.g., https://www.drissionpage.cn/")
-    parser.add_argument("--out", default="output_md", help="Output directory")
+    parser.add_argument("--out", default="docs", help="Output directory")
     parser.add_argument("--max-pages", type=int, default=None, help="Maximum pages to crawl (optional)")
     args = parser.parse_args()
 
@@ -111,3 +130,92 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+__CRAWL_DOCS_PY__
+}
+
+ensure_uv() {
+  if command -v uv >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "error: uv is not installed and curl is missing; install uv manually, or install curl and re-run."
+    exit 1
+  fi
+
+  echo "Installing uv..."
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+
+  export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+
+  if ! command -v uv >/dev/null 2>&1; then
+    echo "error: uv install finished but 'uv' is not on PATH."
+    echo "hint: add ~/.local/bin to PATH (then restart your shell) and re-run."
+    exit 1
+  fi
+}
+
+ensure_venv() {
+  if [[ -x "$VENV_PY" ]]; then
+    return 0
+  fi
+
+  echo "Creating venv: $VENV_DIR (Python 3.11)"
+  if uv venv -p 3.11 "$VENV_DIR"; then
+    return 0
+  fi
+
+  echo "uv venv failed; trying to install Python 3.11 via uv..."
+  uv python install 3.11
+  uv venv -p 3.11 "$VENV_DIR"
+}
+
+ensure_deps() {
+  if "$VENV_PY" -c "import crawl4ai" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  echo "Installing dependencies into venv..."
+  uv pip install --python "$VENV_PY" crawl4ai
+}
+
+main() {
+  if [[ $# -eq 0 ]]; then
+    print_help
+    exit 2
+  fi
+
+  for arg in "$@"; do
+    if [[ "$arg" == "-h" || "$arg" == "--help" ]]; then
+      print_help
+      exit 0
+    fi
+  done
+
+  local caller_dir="$PWD"
+
+  cd "$SCRIPT_DIR"
+  ensure_uv
+  ensure_venv
+  ensure_deps
+
+  local has_out=0
+  for arg in "$@"; do
+    if [[ "$arg" == "--out" || "$arg" == --out=* ]]; then
+      has_out=1
+      break
+    fi
+  done
+
+  local -a args=("$@")
+  if [[ "$has_out" -eq 0 ]]; then
+    args+=("--out" "$caller_dir/docs")
+  fi
+
+  cd "$caller_dir"
+  "$VENV_PY" - "${args[@]}" < <(python_code)
+}
+
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi
